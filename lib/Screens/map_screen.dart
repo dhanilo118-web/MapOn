@@ -4,8 +4,10 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_location_marker/flutter_map_location_marker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:map_on/ifpa_locais.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -18,23 +20,111 @@ class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
   final TextEditingController _searchController = TextEditingController();
 
+  // --- VARIÁVEIS DE VOZ ---
+  late stt.SpeechToText _speech;
+  bool _isListening = false;
+  bool _speechEnabled = false;
+
   // Coordenada inicial genérica (Centro de Tucuruí)
   final LatLng _initialLocation = const LatLng(-3.766, -49.676);
 
+  // LISTA QUE CONTROLA QUAIS PINOS APARECEM
+  List<IfpaPlace> _visiblePlaces = [];
+
+  // VARÍAVEL PARA CONTROLAR O QUE APARECE NA BARRA DESLIZANTE
+  IfpaPlace? _selectedPlace; // Se for null, a barra não aparece
+
+  @override
+  void initState() {
+    super.initState();
+    _speech = stt.SpeechToText();
+    _initSpeechState();
+  }
+
+  // Inicializa o serviço de voz
+  void _initSpeechState() async {
+    try {
+      _speechEnabled = await _speech.initialize(
+        onStatus: (status) {
+          if (status == 'notListening') {
+            setState(() => _isListening = false);
+          }
+        },
+        onError: (errorNotification) {
+          setState(() => _isListening = false);
+          debugPrint("Erro de voz: $errorNotification");
+        },
+      );
+    } catch (e) {
+      debugPrint("Erro ao inicializar voz: $e");
+    }
+    if (mounted) setState(() {});
+  }
+
+  // Função para ligar/desligar microfone
+  void _listen() async {
+    if (!_isListening && _speechEnabled) {
+      setState(() => _isListening = true);
+      _searchController.clear();
+
+      _speech.listen(
+        onResult: (val) {
+          setState(() {
+            _searchController.text = val.recognizedWords;
+          });
+        },
+        localeId: 'pt_BR',
+        listenOptions: stt.SpeechListenOptions(cancelOnError: true),
+      );
+    } else {
+      setState(() => _isListening = false);
+      _speech.stop();
+    }
+  }
+
   // ============================================================
-  // FUNÇÃO DE BUSCA (Corrigida com { chaves })
+  // FUNÇÃO DE BUSCA
   // ============================================================
   Future<void> _searchLocation() async {
     String query = _searchController.text.trim();
+    if (query.endsWith('.')) {
+      query = query.substring(0, query.length - 1);
+    }
 
-    // Correção: Adicionei chaves {}
+    _searchController.text = query;
+    query = query.toLowerCase();
+
     if (query.isEmpty) {
+      setState(() {
+        _visiblePlaces = [];
+        _selectedPlace = null;
+      });
       return;
     }
 
     FocusScope.of(context).unfocus();
 
-    final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1');
+    // 1. Busca Local
+    final localMatch = ifpaLocais.where((place) {
+      return place.title.toLowerCase().contains(query) || place.description.toLowerCase().contains(query);
+    }).toList();
+
+    if (localMatch.isNotEmpty) {
+      setState(() {
+        _visiblePlaces = localMatch;
+        _selectedPlace = localMatch.first;
+      });
+      _mapController.move(localMatch.first.location, 18.0);
+      return;
+    }
+
+    // 2. Busca Online
+    setState(() {
+      _visiblePlaces = [];
+      _selectedPlace = null;
+    });
+
+    final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1&addressdetails=1');
 
     try {
       final response = await http.get(url, headers: {'User-Agent': 'com.example.mapon'});
@@ -45,18 +135,24 @@ class _MapScreenState extends State<MapScreen> {
         if (data.isNotEmpty) {
           final lat = double.parse(data[0]['lat']);
           final lon = double.parse(data[0]['lon']);
-          final nome = data[0]['display_name'].toString().split(',')[0];
 
-          _mapController.move(LatLng(lat, lon), 16.0);
+          String displayName = data[0]['display_name'];
+          final nomeCurto = displayName.split(',')[0];
 
-          // Correção: Adicionei chaves {}
-          if (mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('Encontrado: $nome'), backgroundColor: Colors.green));
-          }
+          final location = LatLng(lat, lon);
+
+          _mapController.move(location, 16.0);
+
+          setState(() {
+            _selectedPlace = IfpaPlace(
+              title: nomeCurto,
+              description: displayName,
+              location: location,
+              icon: Icons.public,
+              color: Colors.blueAccent,
+            );
+          });
         } else {
-          // Correção: Adicionei chaves {}
           if (mounted) {
             ScaffoldMessenger.of(
               context,
@@ -65,7 +161,6 @@ class _MapScreenState extends State<MapScreen> {
         }
       }
     } catch (e) {
-      // Correção: Adicionei chaves {}
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -75,14 +170,13 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   // ============================================================
-  // FUNÇÃO GPS (Corrigida com { chaves })
+  // FUNÇÃO GPS
   // ============================================================
   Future<void> _goToUserLocation() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    // Correção: Adicionei chaves {}
     if (!serviceEnabled) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, ative o GPS do celular.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ative o GPS.')));
       }
       return;
     }
@@ -90,19 +184,20 @@ class _MapScreenState extends State<MapScreen> {
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      // Correção: Adicionei chaves {}
-      if (permission == LocationPermission.denied) {
-        return;
-      }
+      if (permission == LocationPermission.denied) return;
     }
 
-    // Correção: Adicionei chaves {}
-    if (permission == LocationPermission.deniedForever) {
-      return;
-    }
+    if (permission == LocationPermission.deniedForever) return;
 
     final position = await Geolocator.getCurrentPosition();
     _mapController.move(LatLng(position.latitude, position.longitude), 17.0);
+  }
+
+  void _onMarkerTap(IfpaPlace place) {
+    setState(() {
+      _selectedPlace = place;
+    });
+    _mapController.move(place.location, 18.0);
   }
 
   @override
@@ -114,11 +209,34 @@ class _MapScreenState extends State<MapScreen> {
           // 1. O MAPA
           FlutterMap(
             mapController: _mapController,
-            options: MapOptions(initialCenter: _initialLocation, initialZoom: 15.0, minZoom: 3.0, maxZoom: 18.0),
+            options: MapOptions(
+              initialCenter: _initialLocation,
+              initialZoom: 15.0,
+              minZoom: 3.0,
+              // CORREÇÃO: Permitimos zoom alto na câmera (até 19)
+              maxZoom: 19.0,
+              onMapReady: () {
+                _goToUserLocation();
+              },
+              onTap: (tapPosition, point) {
+                if (_selectedPlace != null) {
+                  setState(() {
+                    _selectedPlace = null;
+                  });
+                }
+              },
+            ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                // Satélite da Esri
+                urlTemplate:
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                 userAgentPackageName: 'com.example.mapon',
+                // --- O PULO DO GATO (OVERZOOM) ---
+                // maxNativeZoom: 17 -> Diz: "Só baixe imagens até o nível 17"
+                // maxZoom: 19 -> Diz: "Se passar do 17, estique a imagem até o 19"
+                maxNativeZoom: 17,
+                maxZoom: 19.0,
               ),
               CurrentLocationLayer(
                 alignPositionOnUpdate: AlignOnUpdate.never,
@@ -131,11 +249,43 @@ class _MapScreenState extends State<MapScreen> {
                   accuracyCircleColor: const Color(0xFFEA2A33).withValues(alpha: .1),
                 ),
               ),
+              MarkerLayer(
+                markers: _visiblePlaces.map((place) {
+                  return Marker(
+                    point: place.location,
+                    width: 60,
+                    height: 80,
+                    child: GestureDetector(
+                      onTap: () => _onMarkerTap(place),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.location_on, color: place.color, size: 40),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(4),
+                              boxShadow: const [BoxShadow(blurRadius: 2, color: Colors.black26)],
+                            ),
+                            child: Text(
+                              place.title,
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
               RichAttributionWidget(
                 attributions: [
                   TextSourceAttribution(
-                    'OpenStreetMap contributors',
-                    onTap: () => launchUrl(Uri.parse('https://openstreetmap.org/copyright')),
+                    'Esri World Imagery',
+                    onTap: () => launchUrl(Uri.parse('https://www.esri.com/en-us/legal/copyright-trademarks')),
                   ),
                 ],
               ),
@@ -177,6 +327,14 @@ class _MapScreenState extends State<MapScreen> {
                             style: const TextStyle(color: Colors.white),
                             textInputAction: TextInputAction.search,
                             onSubmitted: (_) => _searchLocation(),
+                            onChanged: (value) {
+                              if (value.isEmpty) {
+                                setState(() {
+                                  _visiblePlaces = [];
+                                  _selectedPlace = null;
+                                });
+                              }
+                            },
                             decoration: const InputDecoration(
                               hintText: "Procurar local...",
                               hintStyle: TextStyle(color: Colors.grey),
@@ -188,9 +346,17 @@ class _MapScreenState extends State<MapScreen> {
                             ),
                           ),
                         ),
-                        const Padding(
-                          padding: EdgeInsets.only(right: 15),
-                          child: Icon(Icons.mic, color: Colors.grey),
+
+                        // --- ÍCONE DO MICROFONE ---
+                        Padding(
+                          padding: const EdgeInsets.only(right: 5),
+                          child: IconButton(
+                            icon: Icon(
+                              _isListening ? Icons.mic : Icons.mic_none,
+                              color: _isListening ? const Color(0xFFEA2A33) : Colors.grey,
+                            ),
+                            onPressed: _listen,
+                          ),
                         ),
                       ],
                     ),
@@ -198,13 +364,12 @@ class _MapScreenState extends State<MapScreen> {
 
                   const SizedBox(height: 16),
 
-                  // --- BOTÕES FLUTUANTES (Alinhados à Direita) ---
+                  // --- BOTÕES FLUTUANTES ---
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Column(
                         children: [
-                          // Botão de GPS (Menor)
                           SizedBox(
                             width: 40,
                             height: 40,
@@ -217,10 +382,7 @@ class _MapScreenState extends State<MapScreen> {
                               child: const Icon(Icons.my_location, color: Colors.white, size: 20),
                             ),
                           ),
-
                           const SizedBox(height: 12),
-
-                          // Botões de Zoom (+ e -)
                           Container(
                             width: 40,
                             decoration: BoxDecoration(
@@ -240,7 +402,7 @@ class _MapScreenState extends State<MapScreen> {
                                   },
                                   icon: const Icon(Icons.add, color: Colors.white),
                                 ),
-                                Container(height: 1, width: 25, color: Colors.grey.withValues(alpha: .3)),
+                                Container(height: 1, width: 25, color: Colors.grey.withValues(alpha: 0.3)),
                                 IconButton(
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(),
@@ -263,40 +425,94 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
 
-          // Painel Inferior (Bottom Sheet)
-          DraggableScrollableSheet(
-            initialChildSize: 0.1,
-            minChildSize: 0.1,
-            maxChildSize: 0.4,
-            builder: (context, scrollController) {
-              return Container(
-                decoration: const BoxDecoration(
-                  color: Color(0xFF121212),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 20, offset: Offset(0, -5))],
-                ),
-                child: ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(24),
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 6,
-                        decoration: BoxDecoration(color: Colors.grey[700], borderRadius: BorderRadius.circular(3)),
+          // 3. BARRA DESLIZANTE
+          if (_selectedPlace != null)
+            DraggableScrollableSheet(
+              initialChildSize: 0.3,
+              minChildSize: 0.15,
+              maxChildSize: 0.5,
+              builder: (context, scrollController) {
+                return Container(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1E1E1E),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                    boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 20, offset: Offset(0, -5))],
+                  ),
+                  child: ListView(
+                    controller: scrollController,
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 5,
+                          margin: const EdgeInsets.only(bottom: 20),
+                          decoration: BoxDecoration(color: Colors.grey[700], borderRadius: BorderRadius.circular(3)),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      "Mapa Livre",
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
-                    const Text("Explore a cidade", style: TextStyle(color: Colors.grey)),
-                  ],
-                ),
-              );
-            },
-          ),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: _selectedPlace!.color.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(_selectedPlace!.icon, size: 32, color: _selectedPlace!.color),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Text(
+                              _selectedPlace!.title,
+                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 15),
+                      Divider(color: Colors.grey[800], thickness: 1, height: 1),
+                      const SizedBox(height: 20),
+                      const Text(
+                        "INFORMAÇÕES",
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _selectedPlace!.description,
+                        style: const TextStyle(color: Color(0xFFE0E0E0), fontSize: 16, height: 1.5),
+                      ),
+                      const SizedBox(height: 30),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              _selectedPlace = null;
+                            });
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2C2C2C),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            side: BorderSide(color: Colors.grey[800]!),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: const Text("Fechar", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );
