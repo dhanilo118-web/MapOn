@@ -26,6 +26,10 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _speechEnabled = false;
 
   bool _isSatellite = true;
+
+  // --- NOVA VARIÁVEL PARA CONTROLAR VISIBILIDADE ---
+  bool _showMarkers = true;
+
   final LatLng _initialLocation = const LatLng(-3.766, -49.676);
 
   List<IfpaPlace> _visiblePlaces = [];
@@ -38,8 +42,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     // Inicialização otimizada para suavidade
     _animatedMapController = AnimatedMapController(
       vsync: this,
-      duration: const Duration(milliseconds: 500), // 500ms é o ideal (nem rápido, nem lento)
-      curve: Curves.fastOutSlowIn, // Curva que dá sensação de resposta rápida
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.fastOutSlowIn,
     );
 
     _speech = stt.SpeechToText();
@@ -107,6 +111,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       setState(() {
         _visiblePlaces = localMatch;
         _selectedPlace = localMatch.first;
+        // Se buscar algo, forçamos mostrar os marcadores caso estejam ocultos
+        _showMarkers = true;
       });
       // Animação suave
       _animatedMapController.animateTo(dest: localMatch.first.location, zoom: 18.0);
@@ -134,6 +140,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           _animatedMapController.animateTo(dest: location, zoom: 16.0);
 
           setState(() {
+            _showMarkers = true; // Força mostrar ao encontrar
             _selectedPlace = IfpaPlace(
               title: nomeCurto,
               description: displayName,
@@ -188,19 +195,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      // Fundo escuro atrás do mapa para quando os tiles carregarem
       backgroundColor: const Color(0xFF1E1E1E),
       body: Stack(
         children: [
           FlutterMap(
-            // Passamos o mapController da biblioteca
             mapController: _animatedMapController.mapController,
             options: MapOptions(
               initialCenter: _initialLocation,
               initialZoom: 15.0,
               minZoom: 3.0,
               maxZoom: 22.0,
-              // Configurações de interação limpas (sem cursorRotation que dava erro)
               interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
               onMapReady: () {
                 _goToUserLocation();
@@ -217,13 +221,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 userAgentPackageName: 'com.example.mapon',
                 maxNativeZoom: _isSatellite ? 17 : 19,
                 maxZoom: 22.0,
-
-                // --- CORREÇÃO AQUI ---
-                // Removido backgroundColor que dava erro.
-                // Ajustado para fluidez:
-                keepBuffer: 2, // Mantém tiles em memória
-                panBuffer: 1, // Carrega tiles adjacentes
-                // O FadeIn suave ajuda a esconder o carregamento
+                keepBuffer: 2,
+                panBuffer: 1,
                 tileDisplay: const TileDisplay.fadeIn(duration: Duration(milliseconds: 300)),
               ),
 
@@ -243,37 +242,44 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 ),
               ),
 
+              // --- CAMADA DE MARCADORES CONDICIONAL ---
               MarkerLayer(
-                markers: _visiblePlaces.map((place) {
-                  return Marker(
-                    point: place.location,
-                    width: 60,
-                    height: 80,
-                    child: GestureDetector(
-                      onTap: () => _onMarkerTap(place),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.location_on, color: place.color, size: 40),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(4),
-                              boxShadow: const [BoxShadow(blurRadius: 2, color: Colors.black26)],
-                            ),
-                            child: Text(
-                              place.title,
-                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
+                markers: _showMarkers
+                    ? _visiblePlaces.map((place) {
+                        return Marker(
+                          point: place.location,
+                          width: 60,
+                          height: 80,
+                          child: GestureDetector(
+                            onTap: () => _onMarkerTap(place),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.location_on, color: place.color, size: 40),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(4),
+                                    boxShadow: const [BoxShadow(blurRadius: 2, color: Colors.black26)],
+                                  ),
+                                  child: Text(
+                                    place.title,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                  );
-                }).toList(),
+                        );
+                      }).toList()
+                    : [], // Lista vazia se _showMarkers for false
               ),
             ],
           ),
@@ -352,36 +358,65 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // BÚSSOLA
+                      // --- LADO ESQUERDO: BÚSSOLA + TOGGLE MARCADORES ---
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
-                        child: SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: FloatingActionButton(
-                            heroTag: "compass",
-                            mini: true,
-                            backgroundColor: Colors.white,
-                            elevation: 4,
-                            onPressed: () {
-                              _animatedMapController.animatedRotateReset();
-                            },
-                            child: StreamBuilder<MapEvent>(
-                              stream: _animatedMapController.mapController.mapEventStream,
-                              builder: (context, snapshot) {
-                                final rotation = _animatedMapController.mapController.camera.rotation;
-                                return Transform.rotate(
-                                  // Rotação sem import math (PI = 3.14159...)
-                                  angle: rotation * (3.1415926535 / 180) * -1,
-                                  child: const Icon(Icons.explore, color: Color(0xFFEA2A33), size: 22),
-                                );
-                              },
+                        child: Column(
+                          children: [
+                            // BÚSSOLA
+                            SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: FloatingActionButton(
+                                heroTag: "compass",
+                                mini: true,
+                                backgroundColor: Colors.white,
+                                elevation: 4,
+                                onPressed: () {
+                                  _animatedMapController.animatedRotateReset();
+                                },
+                                child: StreamBuilder<MapEvent>(
+                                  stream: _animatedMapController.mapController.mapEventStream,
+                                  builder: (context, snapshot) {
+                                    final rotation = _animatedMapController.mapController.camera.rotation;
+                                    return Transform.rotate(
+                                      angle: rotation * (3.1415926535 / 180) * -1,
+                                      child: const Icon(Icons.explore, color: Color(0xFFEA2A33), size: 22),
+                                    );
+                                  },
+                                ),
+                              ),
                             ),
-                          ),
+
+                            const SizedBox(height: 12), // Espaço
+                            // NOVO BOTÃO: MOSTRAR/ESCONDER
+                            SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: FloatingActionButton(
+                                heroTag: "toggle_markers",
+                                mini: true,
+                                backgroundColor: Colors.white,
+                                elevation: 4,
+                                onPressed: () {
+                                  setState(() {
+                                    _showMarkers = !_showMarkers;
+                                    // Fecha o card se esconder os marcadores
+                                    if (!_showMarkers) _selectedPlace = null;
+                                  });
+                                },
+                                child: Icon(
+                                  _showMarkers ? Icons.visibility : Icons.visibility_off,
+                                  color: Colors.grey[800],
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
 
-                      // BOTÕES DIREITA
+                      // --- LADO DIREITO (Camadas, Localização, Zoom) ---
                       Column(
                         children: [
                           SizedBox(
@@ -426,7 +461,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   constraints: const BoxConstraints(),
                                   iconSize: 20,
                                   onPressed: () {
-                                    // Zoom In Suave
                                     _animatedMapController.animatedZoomIn();
                                   },
                                   icon: const Icon(Icons.add, color: Colors.white),
@@ -437,7 +471,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   constraints: const BoxConstraints(),
                                   iconSize: 20,
                                   onPressed: () {
-                                    // Zoom Out Suave
                                     _animatedMapController.animatedZoomOut();
                                   },
                                   icon: const Icon(Icons.remove, color: Colors.white),
