@@ -372,7 +372,7 @@ class _ContactScreenState extends State<ContactScreen> {
         ),
         const SizedBox(height: 30),
         Center(
-          child: Text("Versão 1.0.0", style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+          child: Text("Versão 1.0.2", style: TextStyle(color: Colors.grey[700], fontSize: 12)),
         ),
         const SizedBox(height: 30),
       ],

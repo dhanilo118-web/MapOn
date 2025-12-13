@@ -17,7 +17,6 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
-  // Controlador de animação
   late final AnimatedMapController _animatedMapController;
   final TextEditingController _searchController = TextEditingController();
 
@@ -27,8 +26,8 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
   bool _isSatellite = true;
 
-  // --- NOVA VARIÁVEL PARA CONTROLAR VISIBILIDADE ---
-  bool _showMarkers = true;
+  // Começa oculto
+  bool _showMarkers = false;
 
   final LatLng _initialLocation = const LatLng(-3.766, -49.676);
 
@@ -38,14 +37,13 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-
-    // Inicialização otimizada para suavidade
+    // Carrega a lista padrão, mas como _showMarkers é false, não aparece nada
+    _visiblePlaces = ifpaLocais;
     _animatedMapController = AnimatedMapController(
       vsync: this,
       duration: const Duration(milliseconds: 500),
       curve: Curves.fastOutSlowIn,
     );
-
     _speech = stt.SpeechToText();
     _initSpeechState();
   }
@@ -94,15 +92,16 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
 
     if (query.isEmpty) {
       setState(() {
-        _visiblePlaces = [];
+        _visiblePlaces = ifpaLocais;
         _selectedPlace = null;
+        // Não ativa o olho
       });
       return;
     }
 
     FocusScope.of(context).unfocus();
 
-    // Busca Local
+    // 1. Busca Local
     final localMatch = ifpaLocais.where((place) {
       return place.title.toLowerCase().contains(query) || place.description.toLowerCase().contains(query);
     }).toList();
@@ -111,19 +110,18 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       setState(() {
         _visiblePlaces = localMatch;
         _selectedPlace = localMatch.first;
-        // Se buscar algo, forçamos mostrar os marcadores caso estejam ocultos
-        _showMarkers = true;
+        // NÃO ativa o olho (_showMarkers continua como estava)
       });
-      // Animação suave
       _animatedMapController.animateTo(dest: localMatch.first.location, zoom: 18.0);
       return;
     }
 
-    // Busca Online
+    // 2. Busca Online
     setState(() {
       _visiblePlaces = [];
       _selectedPlace = null;
     });
+
     final url = Uri.parse('https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1&addressdetails=1');
 
     try {
@@ -140,7 +138,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           _animatedMapController.animateTo(dest: location, zoom: 16.0);
 
           setState(() {
-            _showMarkers = true; // Força mostrar ao encontrar
+            // Cria marcador temporário, MAS ele fica oculto se o olho estiver fechado
             _selectedPlace = IfpaPlace(
               title: nomeCurto,
               description: displayName,
@@ -148,12 +146,17 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               icon: Icons.public,
               color: Colors.blueAccent,
             );
+            _visiblePlaces = [_selectedPlace!];
+            // NÃO ativa o olho
           });
         } else {
           if (mounted) {
             ScaffoldMessenger.of(
               context,
             ).showSnackBar(const SnackBar(content: Text('Local não encontrado!'), backgroundColor: Colors.orange));
+            setState(() {
+              _visiblePlaces = ifpaLocais;
+            });
           }
         }
       }
@@ -162,6 +165,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Erro de conexão.'), backgroundColor: Colors.red));
+        setState(() {
+          _visiblePlaces = ifpaLocais;
+        });
       }
     }
   }
@@ -242,7 +248,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 ),
               ),
 
-              // --- CAMADA DE MARCADORES CONDICIONAL ---
               MarkerLayer(
                 markers: _showMarkers
                     ? _visiblePlaces.map((place) {
@@ -279,7 +284,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           ),
                         );
                       }).toList()
-                    : [], // Lista vazia se _showMarkers for false
+                    : [],
               ),
             ],
           ),
@@ -319,12 +324,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             textInputAction: TextInputAction.search,
                             onSubmitted: (_) => _searchLocation(),
                             onChanged: (value) {
-                              if (value.isEmpty) {
-                                setState(() {
-                                  _visiblePlaces = [];
-                                  _selectedPlace = null;
-                                });
-                              }
+                              setState(() {});
                             },
                             decoration: const InputDecoration(
                               hintText: "Procurar local...",
@@ -337,6 +337,22 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             ),
                           ),
                         ),
+
+                        // Botão X: Limpa, mas mantém o estado atual de _showMarkers
+                        if (_searchController.text.isNotEmpty)
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.grey),
+                            onPressed: () {
+                              setState(() {
+                                _searchController.clear();
+                                _visiblePlaces = ifpaLocais;
+                                _selectedPlace = null;
+                                FocusScope.of(context).unfocus();
+                                // Não força _showMarkers, respeita o olho
+                              });
+                            },
+                          ),
+
                         Padding(
                           padding: const EdgeInsets.only(right: 5),
                           child: IconButton(
@@ -358,12 +374,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // --- LADO ESQUERDO: BÚSSOLA + TOGGLE MARCADORES ---
+                      // --- LADO ESQUERDO ---
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
                         child: Column(
                           children: [
-                            // BÚSSOLA
                             SizedBox(
                               width: 40,
                               height: 40,
@@ -387,9 +402,9 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                 ),
                               ),
                             ),
+                            const SizedBox(height: 12),
 
-                            const SizedBox(height: 12), // Espaço
-                            // NOVO BOTÃO: MOSTRAR/ESCONDER
+                            // --- BOTÃO OLHO (AQUI ESTÁ A LÓGICA QUE VOCÊ PEDIU) ---
                             SizedBox(
                               width: 40,
                               height: 40,
@@ -401,8 +416,21 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                 onPressed: () {
                                   setState(() {
                                     _showMarkers = !_showMarkers;
-                                    // Fecha o card se esconder os marcadores
-                                    if (!_showMarkers) _selectedPlace = null;
+
+                                    if (_showMarkers) {
+                                      // SE LIGAR O OLHO:
+                                      // 1. Limpa a barra de pesquisa
+                                      _searchController.clear();
+                                      // 2. Reseta a lista para os locais do IFPA (ignora pesquisa online)
+                                      _visiblePlaces = ifpaLocais;
+                                      // 3. Tira qualquer seleção anterior
+                                      _selectedPlace = null;
+                                      // 4. Fecha o teclado
+                                      FocusScope.of(context).unfocus();
+                                    } else {
+                                      // SE DESLIGAR O OLHO:
+                                      _selectedPlace = null;
+                                    }
                                   });
                                 },
                                 child: Icon(
@@ -416,7 +444,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         ),
                       ),
 
-                      // --- LADO DIREITO (Camadas, Localização, Zoom) ---
+                      // --- LADO DIREITO ---
                       Column(
                         children: [
                           SizedBox(
@@ -446,7 +474,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           ),
                           const SizedBox(height: 12),
 
-                          // ZOOM
                           Container(
                             width: 40,
                             decoration: BoxDecoration(
@@ -460,9 +487,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(),
                                   iconSize: 20,
-                                  onPressed: () {
-                                    _animatedMapController.animatedZoomIn();
-                                  },
+                                  onPressed: () => _animatedMapController.animatedZoomIn(),
                                   icon: const Icon(Icons.add, color: Colors.white),
                                 ),
                                 Container(height: 1, width: 25, color: Colors.grey.withValues(alpha: 0.3)),
@@ -470,9 +495,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(),
                                   iconSize: 20,
-                                  onPressed: () {
-                                    _animatedMapController.animatedZoomOut();
-                                  },
+                                  onPressed: () => _animatedMapController.animatedZoomOut(),
                                   icon: const Icon(Icons.remove, color: Colors.white),
                                 ),
                               ],
