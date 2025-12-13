@@ -23,7 +23,7 @@ class HomeScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               const Text(
-                "Seu guia para o caminho mais rápido e seguro no IFPA.",
+                "Seu guia para o caminho mais simples e rápido no IFPA.",
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 18, color: Colors.white70),
               ),

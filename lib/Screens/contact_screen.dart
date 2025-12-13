@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart'; // Não esqueça de adicionar ao pubspec.yaml
+import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
 
 class ContactScreen extends StatefulWidget {
   const ContactScreen({super.key});
@@ -11,15 +13,121 @@ class ContactScreen extends StatefulWidget {
 class _ContactScreenState extends State<ContactScreen> {
   String _selectedOption = "Feedback";
 
-  // --- FUNÇÃO AUXILIAR PARA ABRIR LINKS (INFO) ---
-  Future<void> _launchURL(String urlString) async {
-    final Uri url = Uri.parse(urlString);
+  // Chave para controlar a validação do formulário
+  final _formKey = GlobalKey<FormState>();
+
+  // Controladores
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _messageController = TextEditingController();
+
+  bool _isSending = false;
+
+  // Anti-Spam
+  DateTime? _lastSubmissionTime;
+
+  // =========================================================
+  // 🔗 SUAS URLS DO DISCORD
+  // =========================================================
+  final String _feedbackWebhookUrl =
+      "https://discord.com/api/webhooks/1449429463409627326/dIsdS8ryDU9o3H5bW_GzSkBgzefx8DMk-LomcDXYz321dufcdAHeDR2CNAUEqSOlmhgy";
+  final String _supportWebhookUrl =
+      "https://discord.com/api/webhooks/1449432958724477215/HOo2t1MMSUPvVXzX5gUAvD6j_EcSu-1jGpo7eZ7tyyJsAL4xFWNKIJed1fdVgP66L8mp";
+
+  Future<void> _sendToDiscord() async {
+    // 1. DISPARA A VALIDAÇÃO VISUAL
+    // Isso faz os campos vazios ficarem vermelhos automaticamente
+    if (!_formKey.currentState!.validate()) {
+      return; // Se tiver erro, para aqui e não envia
+    }
+
+    // 2. Validação das URLs
+    if (_feedbackWebhookUrl.contains("URL_DO") || _supportWebhookUrl.contains("URL_DO")) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Erro: Configure os Webhooks no código!")));
+      return;
+    }
+
+    // 3. Bloqueio Anti-Spam
+    if (_lastSubmissionTime != null) {
+      final difference = DateTime.now().difference(_lastSubmissionTime!);
+      if (difference.inSeconds < 60) {
+        final waitSeconds = 60 - difference.inSeconds;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Aguarde $waitSeconds segundos para enviar novamente."),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    }
+
+    setState(() => _isSending = true);
+
+    final isSupport = _selectedOption == "Suporte";
+    final urlToUse = isSupport ? _supportWebhookUrl : _feedbackWebhookUrl;
+    final color = isSupport ? 15548997 : 5763719; // Vermelho ou Verde
+    final title = isSupport ? "🚨 PEDIDO DE SUPORTE" : "🔔 NOVO FEEDBACK";
+
     try {
-      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-        debugPrint('Não foi possível abrir $urlString');
+      final messageData = {
+        "username": isSupport ? "Suporte MapOn" : "Feedback MapOn",
+        "embeds": [
+          {
+            "title": title,
+            "color": color,
+            "fields": [
+              {"name": "👤 Usuário", "value": _nameController.text, "inline": true},
+              {"name": "📧 Contato", "value": _emailController.text, "inline": true},
+              {"name": "📝 Mensagem", "value": _messageController.text},
+            ],
+            "footer": {"text": "Enviado via App MapOn"},
+          },
+        ],
+      };
+
+      final response = await http.post(
+        Uri.parse(urlToUse),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode(messageData),
+      );
+
+      if (mounted) {
+        if (response.statusCode == 204) {
+          _lastSubmissionTime = DateTime.now();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(isSupport ? "Solicitação enviada! Aguarde retorno." : "Feedback enviado! Obrigado."),
+              backgroundColor: isSupport ? Colors.redAccent : Colors.green,
+            ),
+          );
+          _clearForm();
+        } else {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text("Erro ao enviar."), backgroundColor: Colors.red));
+        }
       }
     } catch (e) {
-      debugPrint('Erro ao abrir link: $e');
+      debugPrint("Erro: $e");
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
+  }
+
+  void _clearForm() {
+    _nameController.clear();
+    _emailController.clear();
+    _messageController.clear();
+    _formKey.currentState?.reset(); // Reseta o estado visual de erro
+  }
+
+  Future<void> _launchURL(String urlString) async {
+    final Uri url = Uri.parse(urlString);
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      debugPrint('Erro ao abrir $urlString');
     }
   }
 
@@ -30,15 +138,12 @@ class _ContactScreenState extends State<ContactScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF121212),
         elevation: 0,
-        // Botão de voltar (opcional se estiver na tab bar)
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
-          onPressed: () {
-            // Se for navegar para fora, adicione a lógica aqui.
-          },
+          onPressed: () {},
         ),
         title: Text(
-          _selectedOption == "Info" ? "Sobre & Créditos" : "Fale Conosco",
+          _selectedOption == "Info" ? "Sobre" : "Fale Conosco",
           style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         centerTitle: true,
@@ -48,7 +153,7 @@ class _ContactScreenState extends State<ContactScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // --- 1. BARRA DE SELEÇÃO (TOGGLE) ---
+            // --- ABAS ---
             Container(
               height: 48,
               padding: const EdgeInsets.all(4),
@@ -58,7 +163,10 @@ class _ContactScreenState extends State<ContactScreen> {
                   final isSelected = _selectedOption == option;
                   return Expanded(
                     child: GestureDetector(
-                      onTap: () => setState(() => _selectedOption = option),
+                      onTap: () => setState(() {
+                        _selectedOption = option;
+                        _formKey.currentState?.reset(); // Limpa erros ao trocar de aba
+                      }),
                       child: Container(
                         decoration: BoxDecoration(
                           color: isSelected ? const Color(0xFFEA2A33) : Colors.transparent,
@@ -75,21 +183,154 @@ class _ContactScreenState extends State<ContactScreen> {
                 }).toList(),
               ),
             ),
-
             const SizedBox(height: 24),
 
-            // --- 2. CONTEÚDO DINÂMICO ---
-            // Se for "Info", mostra os créditos. Se não, mostra o formulário.
-            if (_selectedOption == "Info") _buildInfoContent() else _buildFormContent(),
+            // --- CONTEÚDO ---
+            if (_selectedOption == "Info") _buildInfoContent() else _buildUnifiedForm(),
           ],
         ),
       ),
     );
   }
 
-  // =========================================================
-  // WIDGETS DA TELA DE INFO (CRÉDITOS)
-  // =========================================================
+  Widget _buildUnifiedForm() {
+    final isSupport = _selectedOption == "Suporte";
+
+    return Form(
+      key: _formKey, // VINCULA O FORMULÁRIO À CHAVE DE VALIDAÇÃO
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            isSupport ? "Precisa de ajuda técnica?" : "Ajude a melhorar o MapOn!",
+            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            isSupport
+                ? "Preencha abaixo e nossa equipe analisará seu caso."
+                : "Encontrou um erro ou tem uma ideia? Conta pra gente.",
+            style: const TextStyle(color: Colors.grey, fontSize: 14),
+          ),
+          const SizedBox(height: 20),
+
+          // CAMPO NOME (Obrigatório, sem aviso no título)
+          _buildLabel("Seu Nome"),
+          _buildTextFormField(
+            controller: _nameController,
+            hint: "Digite seu nome",
+            icon: Icons.person,
+            isRequired: true,
+          ),
+
+          const SizedBox(height: 16),
+
+          // CAMPO EMAIL (Obrigatório para ambos)
+          _buildLabel("Seu Email"),
+          _buildTextFormField(
+            controller: _emailController,
+            hint: "email@exemplo.com",
+            icon: Icons.email,
+            isRequired: true,
+            isEmail: true,
+          ),
+
+          const SizedBox(height: 16),
+
+          // CAMPO MENSAGEM (Obrigatório)
+          _buildLabel("Mensagem"),
+          _buildTextFormField(
+            controller: _messageController,
+            hint: isSupport ? "Estou tendo problemas com..." : "Minha sugestão é...",
+            icon: Icons.message,
+            isRequired: true,
+            maxLines: 5,
+          ),
+
+          const SizedBox(height: 32),
+
+          SizedBox(
+            height: 56,
+            child: ElevatedButton(
+              onPressed: _isSending ? null : _sendToDiscord,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEA2A33),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 4,
+              ),
+              child: _isSending
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : Text(
+                      isSupport ? "Enviar Solicitação" : "Enviar Feedback",
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // WIDGET PERSONALIZADO DO CAMPO DE TEXTO
+  Widget _buildTextFormField({
+    required TextEditingController controller,
+    required String hint,
+    IconData? icon,
+    bool isRequired = false,
+    bool isEmail = false,
+    int maxLines = 1,
+  }) {
+    return TextFormField(
+      controller: controller,
+      maxLines: maxLines,
+      style: const TextStyle(color: Colors.white),
+      textAlign: TextAlign.start, // Texto digita da esquerda pra direita
+      // VALIDAÇÃO
+      validator: (value) {
+        if (isRequired && (value == null || value.trim().isEmpty)) {
+          return 'Campo obrigatório'; // Mensagem de erro
+        }
+        if (isEmail && value != null && value.isNotEmpty && !value.contains('@')) {
+          return 'Email inválido';
+        }
+        return null; // Sem erro
+      },
+
+      decoration: InputDecoration(
+        prefixIcon: maxLines == 1 && icon != null ? Icon(icon, color: Colors.grey[600]) : null,
+        hintText: hint,
+        hintStyle: const TextStyle(color: Colors.white24),
+        filled: true,
+        fillColor: const Color(0xFF1E1E1E),
+        contentPadding: const EdgeInsets.all(16),
+
+        // BORDA NORMAL
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+
+        // BORDA VERMELHA (QUANDO TIVER ERRO)
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
+        ),
+
+        // TEXTO DE ERRO (VERMELHO E ALINHADO NA ESQUERDA - PADRÃO)
+        // O Flutter não permite alinhar apenas a mensagem de erro à direita nativamente sem gambiarras.
+        // O padrão visual é alinhar no início do campo (esquerda).
+        errorStyle: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  // (MANTENHA O CONTEÚDO DA ABA INFO IGUAL AO ANTERIOR)
   Widget _buildInfoContent() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -101,52 +342,50 @@ class _ContactScreenState extends State<ContactScreen> {
         const SizedBox(height: 8),
         const Text(
           "O MapOn é um projeto desenvolvido para facilitar a localização dentro do Campus IFPA Tucuruí.",
-          style: TextStyle(color: Colors.grey, fontSize: 14, height: 1.5),
+          style: TextStyle(color: Colors.grey, fontSize: 14),
         ),
-
         const SizedBox(height: 24),
         const Text(
           "Créditos e Licenças",
           style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 16),
-
-        // Bloco 1: OpenStreetMap
         _buildCreditTile(
           title: "Dados do Mapa",
           subtitle: "© OpenStreetMap contributors",
           icon: Icons.map_outlined,
           onTap: () => _launchURL('https://www.openstreetmap.org/copyright'),
         ),
-
         const SizedBox(height: 12),
-
-        // Bloco 2: Esri (Satélite)
         _buildCreditTile(
           title: "Imagens de Satélite",
-          subtitle: "Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+          subtitle: "Source: Esri, Maxar, Earthstar Geographics",
           icon: Icons.satellite_alt,
           onTap: () => _launchURL('https://www.esri.com/en-us/legal/copyright-trademarks'),
         ),
-
         const SizedBox(height: 12),
-
-        // Bloco 3: Flutter Map
         _buildCreditTile(
           title: "Motor de Renderização",
           subtitle: "Desenvolvido com flutter_map",
           icon: Icons.code,
           onTap: () => _launchURL('https://pub.dev/packages/flutter_map'),
         ),
-
         const SizedBox(height: 30),
         Center(
           child: Text("Versão 1.0.0", style: TextStyle(color: Colors.grey[700], fontSize: 12)),
         ),
-        const SizedBox(height: 50), // Espaço extra no final
+        const SizedBox(height: 30),
       ],
     );
   }
+
+  Widget _buildLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8, left: 4),
+    child: Text(
+      text,
+      style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
+    ),
+  );
 
   Widget _buildCreditTile({
     required String title,
@@ -169,136 +408,6 @@ class _ContactScreenState extends State<ContactScreen> {
         subtitle: Text(subtitle, style: const TextStyle(color: Colors.grey, fontSize: 12)),
         trailing: const Icon(Icons.open_in_new, color: Colors.grey, size: 18),
         onTap: onTap,
-      ),
-    );
-  }
-
-  // =========================================================
-  // WIDGETS DA TELA DE FEEDBACK E SUPORTE (FORMULÁRIO)
-  // =========================================================
-  Widget _buildFormContent() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _buildLabel("Nome"),
-        const TextField(
-          style: TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: "Digite seu nome",
-            hintStyle: TextStyle(color: Colors.white24),
-            filled: true,
-            fillColor: Color(0xFF1E1E1E),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.all(Radius.circular(12)),
-              borderSide: BorderSide.none,
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        _buildLabel("Seu email"),
-        const TextField(
-          style: TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: "email@exemplo.com",
-            hintStyle: TextStyle(color: Colors.white24),
-            filled: true,
-            fillColor: Color(0xFF1E1E1E),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.all(Radius.circular(12)),
-              borderSide: BorderSide.none,
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        _buildLabel(_selectedOption == "Suporte" ? "Descreva o problema..." : "Sua mensagem..."),
-        TextField(
-          maxLines: 5,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: _selectedOption == "Suporte"
-                ? "Tive um erro ao tentar..."
-                : "Deixe seu feedback ou dúvida aqui...",
-            hintStyle: const TextStyle(color: Colors.white24),
-            contentPadding: const EdgeInsets.all(20),
-            filled: true,
-            fillColor: const Color(0xFF1E1E1E),
-            border: const OutlineInputBorder(
-              borderRadius: BorderRadius.all(Radius.circular(12)),
-              borderSide: BorderSide.none,
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-        SizedBox(
-          height: 56,
-          child: ElevatedButton(
-            onPressed: () {},
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEA2A33),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-              shadowColor: const Color(0xFFEA2A33).withValues(alpha: .4),
-              elevation: 8,
-            ),
-            child: Text(
-              _selectedOption == "Suporte" ? "Pedir Ajuda" : "Enviar Mensagem",
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-          ),
-        ),
-        const SizedBox(height: 32),
-        const Center(
-          child: Text("Nossas Redes Sociais", style: TextStyle(color: Colors.grey)),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildSocialIcon(Icons.camera_alt),
-            const SizedBox(width: 16),
-            _buildSocialIcon(Icons.alternate_email),
-            const SizedBox(width: 16),
-            _buildSocialIcon(Icons.facebook),
-          ],
-        ),
-        const SizedBox(height: 32),
-        _buildContactTile(Icons.call, "+55 (94) 98765-4321"),
-        const SizedBox(height: 12),
-        _buildContactTile(Icons.location_on, "IFPA Campus Tucuruí"),
-        const SizedBox(height: 50),
-      ],
-    );
-  }
-
-  // --- HELPERS DO FORMULÁRIO ---
-  Widget _buildLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0, left: 4),
-      child: Text(
-        text,
-        style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
-      ),
-    );
-  }
-
-  Widget _buildSocialIcon(IconData icon) {
-    return Container(
-      width: 48,
-      height: 48,
-      decoration: const BoxDecoration(color: Color(0xFF1E1E1E), shape: BoxShape.circle),
-      child: Icon(icon, color: Colors.white),
-    );
-  }
-
-  Widget _buildContactTile(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(30)),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.grey),
-          const SizedBox(width: 16),
-          Text(text, style: const TextStyle(color: Colors.white, fontSize: 16)),
-        ],
       ),
     );
   }
