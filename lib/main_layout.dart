@@ -1,7 +1,7 @@
+import 'package:MapOn/Screens/contact_screen.dart';
+import 'package:MapOn/Screens/home_page.dart';
+import 'package:MapOn/Screens/map_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:map_on/Screens/contact_screen.dart';
-import 'package:map_on/Screens/home_page.dart';
-import 'package:map_on/Screens/map_screen.dart';
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
