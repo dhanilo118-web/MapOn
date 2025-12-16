@@ -25,9 +25,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _speechEnabled = false;
 
   bool _isSatellite = true;
-
-  // Começa oculto
   bool _showMarkers = false;
+
+  // --- NOVA VARIÁVEL DE CONTROLE ---
+  // Começa como false. Só vira true se tivermos permissão.
+  bool _hasLocationPermission = false;
 
   final LatLng _initialLocation = const LatLng(-3.766, -49.676);
 
@@ -37,7 +39,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    // Carrega a lista padrão, mas como _showMarkers é false, não aparece nada
     _visiblePlaces = ifpaLocais;
     _animatedMapController = AnimatedMapController(
       vsync: this,
@@ -46,12 +47,25 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     );
     _speech = stt.SpeechToText();
     _initSpeechState();
+    // Verificamos a permissão logo ao iniciar
+    _checkInitialPermission();
   }
 
   @override
   void dispose() {
     _animatedMapController.dispose();
     super.dispose();
+  }
+
+  // --- NOVA FUNÇÃO PARA VERIFICAR NA INICIALIZAÇÃO ---
+  Future<void> _checkInitialPermission() async {
+    final permission = await Geolocator.checkPermission();
+    if (mounted) {
+      setState(() {
+        _hasLocationPermission =
+            (permission == LocationPermission.always || permission == LocationPermission.whileInUse);
+      });
+    }
   }
 
   void _initSpeechState() async {
@@ -94,14 +108,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       setState(() {
         _visiblePlaces = ifpaLocais;
         _selectedPlace = null;
-        // Não ativa o olho
       });
       return;
     }
 
     FocusScope.of(context).unfocus();
 
-    // 1. Busca Local
     final localMatch = ifpaLocais.where((place) {
       return place.title.toLowerCase().contains(query) || place.description.toLowerCase().contains(query);
     }).toList();
@@ -110,13 +122,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
       setState(() {
         _visiblePlaces = localMatch;
         _selectedPlace = localMatch.first;
-        // NÃO ativa o olho (_showMarkers continua como estava)
       });
       _animatedMapController.animateTo(dest: localMatch.first.location, zoom: 18.0);
       return;
     }
 
-    // 2. Busca Online
     setState(() {
       _visiblePlaces = [];
       _selectedPlace = null;
@@ -138,7 +148,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
           _animatedMapController.animateTo(dest: location, zoom: 16.0);
 
           setState(() {
-            // Cria marcador temporário, MAS ele fica oculto se o olho estiver fechado
             _selectedPlace = IfpaPlace(
               title: nomeCurto,
               description: displayName,
@@ -147,7 +156,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
               color: Colors.blueAccent,
             );
             _visiblePlaces = [_selectedPlace!];
-            // NÃO ativa o olho
           });
         } else {
           if (mounted) {
@@ -172,6 +180,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
   }
 
+  // --- FUNÇÃO _goToUserLocation ATUALIZADA ---
   Future<void> _goToUserLocation() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -182,12 +191,25 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     }
 
     LocationPermission permission = await Geolocator.checkPermission();
+
+    // Se já tem permissão, garante que a variável está true
+    if (permission == LocationPermission.whileInUse || permission == LocationPermission.always) {
+      if (mounted && !_hasLocationPermission) setState(() => _hasLocationPermission = true);
+    }
+
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
+      if (permission == LocationPermission.denied) {
+        return; // Negou no popup
+      }
+      // Se aceitou no popup, atualizamos a variável para true!
+      if (mounted) {
+        setState(() => _hasLocationPermission = true);
+      }
     }
     if (permission == LocationPermission.deniedForever) return;
 
+    // Pega a posição e move
     final position = await Geolocator.getCurrentPosition();
     _animatedMapController.animateTo(dest: LatLng(position.latitude, position.longitude), zoom: 17.0);
   }
@@ -232,21 +254,25 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                 tileDisplay: const TileDisplay.fadeIn(duration: Duration(milliseconds: 300)),
               ),
 
-              CurrentLocationLayer(
-                alignPositionOnUpdate: AlignOnUpdate.never,
-                style: LocationMarkerStyle(
-                  markerSize: const Size(20, 20),
-                  marker: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEA2A33),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                      boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 3)],
+              // --- A MÁGICA ACONTECE AQUI ---
+              // Só adicionamos o CurrentLocationLayer na árvore de widgets
+              // se a variável _hasLocationPermission for verdadeira.
+              if (_hasLocationPermission)
+                CurrentLocationLayer(
+                  alignPositionOnUpdate: AlignOnUpdate.never,
+                  style: LocationMarkerStyle(
+                    markerSize: const Size(20, 20),
+                    marker: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEA2A33),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                        boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 3)],
+                      ),
                     ),
+                    accuracyCircleColor: const Color(0xFFEA2A33).withValues(alpha: .15),
                   ),
-                  accuracyCircleColor: const Color(0xFFEA2A33).withValues(alpha: .15),
                 ),
-              ),
 
               MarkerLayer(
                 markers: _showMarkers
@@ -338,7 +364,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                           ),
                         ),
 
-                        // Botão X: Limpa, mas mantém o estado atual de _showMarkers
                         if (_searchController.text.isNotEmpty)
                           IconButton(
                             icon: const Icon(Icons.close, color: Colors.grey),
@@ -348,7 +373,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                 _visiblePlaces = ifpaLocais;
                                 _selectedPlace = null;
                                 FocusScope.of(context).unfocus();
-                                // Não força _showMarkers, respeita o olho
                               });
                             },
                           ),
@@ -374,7 +398,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // --- LADO ESQUERDO ---
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
                         child: Column(
@@ -404,7 +427,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                             ),
                             const SizedBox(height: 12),
 
-                            // --- BOTÃO OLHO (AQUI ESTÁ A LÓGICA QUE VOCÊ PEDIU) ---
                             SizedBox(
                               width: 40,
                               height: 40,
@@ -418,17 +440,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                                     _showMarkers = !_showMarkers;
 
                                     if (_showMarkers) {
-                                      // SE LIGAR O OLHO:
-                                      // 1. Limpa a barra de pesquisa
                                       _searchController.clear();
-                                      // 2. Reseta a lista para os locais do IFPA (ignora pesquisa online)
                                       _visiblePlaces = ifpaLocais;
-                                      // 3. Tira qualquer seleção anterior
                                       _selectedPlace = null;
-                                      // 4. Fecha o teclado
                                       FocusScope.of(context).unfocus();
                                     } else {
-                                      // SE DESLIGAR O OLHO:
                                       _selectedPlace = null;
                                     }
                                   });
@@ -444,7 +460,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
                         ),
                       ),
 
-                      // --- LADO DIREITO ---
                       Column(
                         children: [
                           SizedBox(

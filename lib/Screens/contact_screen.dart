@@ -12,36 +12,24 @@ class ContactScreen extends StatefulWidget {
 
 class _ContactScreenState extends State<ContactScreen> {
   String _selectedOption = "Feedback";
-
-  // Chave para controlar a validação do formulário
   final _formKey = GlobalKey<FormState>();
 
-  // Controladores
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _messageController = TextEditingController();
 
   bool _isSending = false;
-
-  // Anti-Spam
   DateTime? _lastSubmissionTime;
 
-  // =========================================================
-  // 🔗 SUAS URLS DO DISCORD
-  // =========================================================
+  // 🔗 SUAS URLS DO DISCORD (Mantenha as suas chaves aqui)
   final String _feedbackWebhookUrl =
       "https://discord.com/api/webhooks/1449429463409627326/dIsdS8ryDU9o3H5bW_GzSkBgzefx8DMk-LomcDXYz321dufcdAHeDR2CNAUEqSOlmhgy";
   final String _supportWebhookUrl =
       "https://discord.com/api/webhooks/1449432958724477215/HOo2t1MMSUPvVXzX5gUAvD6j_EcSu-1jGpo7eZ7tyyJsAL4xFWNKIJed1fdVgP66L8mp";
 
   Future<void> _sendToDiscord() async {
-    // 1. DISPARA A VALIDAÇÃO VISUAL
-    // Isso faz os campos vazios ficarem vermelhos automaticamente
-    if (!_formKey.currentState!.validate()) {
-      return; // Se tiver erro, para aqui e não envia
-    }
+    if (!_formKey.currentState!.validate()) return;
 
-    // 2. Validação das URLs
     if (_feedbackWebhookUrl.contains("URL_DO") || _supportWebhookUrl.contains("URL_DO")) {
       ScaffoldMessenger.of(
         context,
@@ -49,7 +37,6 @@ class _ContactScreenState extends State<ContactScreen> {
       return;
     }
 
-    // 3. Bloqueio Anti-Spam
     if (_lastSubmissionTime != null) {
       final difference = DateTime.now().difference(_lastSubmissionTime!);
       if (difference.inSeconds < 60) {
@@ -68,7 +55,7 @@ class _ContactScreenState extends State<ContactScreen> {
 
     final isSupport = _selectedOption == "Suporte";
     final urlToUse = isSupport ? _supportWebhookUrl : _feedbackWebhookUrl;
-    final color = isSupport ? 15548997 : 5763719; // Vermelho ou Verde
+    final color = isSupport ? 15548997 : 5763719;
     final title = isSupport ? "🚨 PEDIDO DE SUPORTE" : "🔔 NOVO FEEDBACK";
 
     try {
@@ -121,7 +108,7 @@ class _ContactScreenState extends State<ContactScreen> {
     _nameController.clear();
     _emailController.clear();
     _messageController.clear();
-    _formKey.currentState?.reset(); // Reseta o estado visual de erro
+    _formKey.currentState?.reset();
   }
 
   Future<void> _launchURL(String urlString) async {
@@ -140,7 +127,7 @@ class _ContactScreenState extends State<ContactScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
-          onPressed: () {},
+          onPressed: () {}, // Ajuste se precisar de navegação
         ),
         title: Text(
           _selectedOption == "Info" ? "Sobre" : "Fale Conosco",
@@ -165,7 +152,7 @@ class _ContactScreenState extends State<ContactScreen> {
                     child: GestureDetector(
                       onTap: () => setState(() {
                         _selectedOption = option;
-                        _formKey.currentState?.reset(); // Limpa erros ao trocar de aba
+                        _formKey.currentState?.reset();
                       }),
                       child: Container(
                         decoration: BoxDecoration(
@@ -197,7 +184,7 @@ class _ContactScreenState extends State<ContactScreen> {
     final isSupport = _selectedOption == "Suporte";
 
     return Form(
-      key: _formKey, // VINCULA O FORMULÁRIO À CHAVE DE VALIDAÇÃO
+      key: _formKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -212,37 +199,37 @@ class _ContactScreenState extends State<ContactScreen> {
                 : "Encontrou um erro ou tem uma ideia? Conta pra gente.",
             style: const TextStyle(color: Colors.grey, fontSize: 14),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
-          // CAMPO NOME (Obrigatório, sem aviso no título)
-          _buildLabel("Seu Nome"),
+          // --- CAMPO NOME ---
           _buildTextFormField(
             controller: _nameController,
-            hint: "Digite seu nome",
-            icon: Icons.person,
+            label: "Nome Completo", // Título na borda
+            hint: "Ex: Cleitin Del Rei", // Texto de exemplo dentro
+            icon: Icons.person_outline,
             isRequired: true,
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
 
-          // CAMPO EMAIL (Obrigatório para ambos)
-          _buildLabel("Seu Email"),
+          // --- CAMPO EMAIL ---
           _buildTextFormField(
             controller: _emailController,
-            hint: "email@exemplo.com",
-            icon: Icons.email,
+            label: "Seu Email",
+            hint: "Ex: email@exemplo.com",
+            icon: Icons.email_outlined,
             isRequired: true,
             isEmail: true,
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
 
-          // CAMPO MENSAGEM (Obrigatório)
-          _buildLabel("Mensagem"),
+          // --- CAMPO MENSAGEM ---
           _buildTextFormField(
             controller: _messageController,
-            hint: isSupport ? "Estou tendo problemas com..." : "Minha sugestão é...",
-            icon: Icons.message,
+            label: "Mensagem",
+            hint: isSupport ? "Descreva seu problema..." : "Sua sugestão...",
+            icon: Icons.message_outlined,
             isRequired: true,
             maxLines: 5,
           ),
@@ -275,9 +262,10 @@ class _ContactScreenState extends State<ContactScreen> {
     );
   }
 
-  // WIDGET PERSONALIZADO DO CAMPO DE TEXTO
+  // === WIDGET DO INPUT ESTILO OUTLINE (IGUAL A FOTO) ===
   Widget _buildTextFormField({
     required TextEditingController controller,
+    required String label, // Novo parâmetro Label
     required String hint,
     IconData? icon,
     bool isRequired = false,
@@ -288,31 +276,43 @@ class _ContactScreenState extends State<ContactScreen> {
       controller: controller,
       maxLines: maxLines,
       style: const TextStyle(color: Colors.white),
-      textAlign: TextAlign.start, // Texto digita da esquerda pra direita
-      // VALIDAÇÃO
       validator: (value) {
         if (isRequired && (value == null || value.trim().isEmpty)) {
-          return 'Campo obrigatório'; // Mensagem de erro
+          return 'Campo obrigatório';
         }
         if (isEmail && value != null && value.isNotEmpty && !value.contains('@')) {
           return 'Email inválido';
         }
-        return null; // Sem erro
+        return null;
       },
-
       decoration: InputDecoration(
-        prefixIcon: maxLines == 1 && icon != null ? Icon(icon, color: Colors.grey[600]) : null,
+        // CONFIGURAÇÃO DO LABEL "CORTANDO" A BORDA
+        labelText: label,
+        labelStyle: const TextStyle(color: Colors.white70),
+        floatingLabelBehavior: FloatingLabelBehavior.always, // Mantém o Label sempre em cima
+
         hintText: hint,
         hintStyle: const TextStyle(color: Colors.white24),
+
+        prefixIcon: maxLines == 1 && icon != null ? Icon(icon, color: Colors.grey[500]) : null,
+
         filled: true,
-        fillColor: const Color(0xFF1E1E1E),
-        contentPadding: const EdgeInsets.all(16),
+        fillColor: const Color(0xFF1E1E1E), // Fundo levemente mais claro que o fundo preto
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
 
-        // BORDA NORMAL
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-
-        // BORDA VERMELHA (QUANDO TIVER ERRO)
+        // BORDAS ARREDONDADAS COM OUTLINE
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.white24),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Colors.white24),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Color(0xFFEA2A33), width: 2), // Borda Vermelha ao focar
+        ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
@@ -321,16 +321,10 @@ class _ContactScreenState extends State<ContactScreen> {
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
         ),
-
-        // TEXTO DE ERRO (VERMELHO E ALINHADO NA ESQUERDA - PADRÃO)
-        // O Flutter não permite alinhar apenas a mensagem de erro à direita nativamente sem gambiarras.
-        // O padrão visual é alinhar no início do campo (esquerda).
-        errorStyle: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
       ),
     );
   }
 
-  // (MANTENHA O CONTEÚDO DA ABA INFO IGUAL AO ANTERIOR)
   Widget _buildInfoContent() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -372,20 +366,12 @@ class _ContactScreenState extends State<ContactScreen> {
         ),
         const SizedBox(height: 30),
         Center(
-          child: Text("Versão 1.0.2", style: TextStyle(color: Colors.grey[700], fontSize: 12)),
+          child: Text("Versão 1.0.3", style: TextStyle(color: Colors.grey[700], fontSize: 12)),
         ),
         const SizedBox(height: 30),
       ],
     );
   }
-
-  Widget _buildLabel(String text) => Padding(
-    padding: const EdgeInsets.only(bottom: 8, left: 4),
-    child: Text(
-      text,
-      style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w500),
-    ),
-  );
 
   Widget _buildCreditTile({
     required String title,
